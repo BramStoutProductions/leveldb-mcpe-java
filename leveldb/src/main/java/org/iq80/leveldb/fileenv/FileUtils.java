@@ -17,12 +17,14 @@
  */
 package org.iq80.leveldb.fileenv;
 
+import static com.google.common.base.Preconditions.checkArgument;
+
 import java.io.File;
 import java.io.FilenameFilter;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
-
-import static com.google.common.base.Preconditions.checkArgument;
 
 public final class FileUtils
 {
@@ -54,18 +56,18 @@ public final class FileUtils
     {
         File[] files = dir.listFiles();
         if (files == null) {
-            return List.of();
+            return new ArrayList<File>();
         }
-        return List.of(files);
+        return Arrays.asList(files);
     }
 
     public static List<File> listFiles(File dir, FilenameFilter filter)
     {
         File[] files = dir.listFiles(filter);
         if (files == null) {
-            return List.of();
+            return new ArrayList<File>();
         }
-        return List.of(files);
+        return Arrays.asList(files);
     }
 
     public static File createTempDir(String prefix)

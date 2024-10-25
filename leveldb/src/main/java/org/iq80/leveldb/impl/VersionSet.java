@@ -38,6 +38,7 @@ import org.iq80.leveldb.util.Slice;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
@@ -98,6 +99,7 @@ public class VersionSet
         File currentFile = databaseDir.child(Filename.currentFileName());
 
         if (!currentFile.exists()) {
+            checkState(!options.readOnly());
             VersionEdit edit = new VersionEdit();
             edit.setComparatorName(internalKeyComparator.name());
             edit.setLogNumber(prevLogNumber);
@@ -252,6 +254,7 @@ public class VersionSet
     public void logAndApply(VersionEdit edit, ReentrantLock mutex)
             throws IOException
     {
+        checkState(!options.readOnly());
         if (edit.getLogNumber() != null) {
             checkArgument(edit.getLogNumber() >= logNumber);
             checkArgument(edit.getLogNumber() < nextFileNumber.get());
@@ -326,6 +329,7 @@ public class VersionSet
     private void writeSnapshot(LogWriter log)
             throws IOException
     {
+        checkState(!options.readOnly());
         // Save metadata
         VersionEdit edit = new VersionEdit();
         edit.setComparatorName(internalKeyComparator.name());
@@ -579,6 +583,7 @@ public class VersionSet
 
     public Compaction compactRange(int level, InternalKey begin, InternalKey end)
     {
+        checkState(!options.readOnly());
         List<FileMetaData> levelInputs = getOverlappingInputs(level, begin, end);
         if (levelInputs.isEmpty()) {
             return null;
@@ -589,6 +594,7 @@ public class VersionSet
 
     public Compaction pickCompaction()
     {
+        checkState(!options.readOnly());
         // We prefer compactions triggered by too much data in a level over
         // the compactions triggered by seeks.
         boolean sizeCompaction = (current.getCompactionScore() >= 1);
@@ -617,7 +623,7 @@ public class VersionSet
         }
         else if (seekCompaction) {
             level = current.getFileToCompactLevel();
-            levelInputs = List.of(current.getFileToCompact());
+            levelInputs = Arrays.asList(current.getFileToCompact());
         }
         else {
             return null;
@@ -965,7 +971,7 @@ public class VersionSet
 
                 Collection<FileMetaData> baseFiles = baseVersion.getFiles(level);
                 if (baseFiles == null) {
-                    baseFiles = List.of();
+                    baseFiles = new ArrayList<FileMetaData>();
                 }
                 SortedSet<FileMetaData> addedFiles = levels.get(level).addedFiles;
                 if (addedFiles == null) {

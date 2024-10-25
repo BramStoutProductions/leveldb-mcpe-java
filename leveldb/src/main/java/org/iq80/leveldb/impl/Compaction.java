@@ -20,6 +20,7 @@ package org.iq80.leveldb.impl;
 import org.iq80.leveldb.table.UserComparator;
 import org.iq80.leveldb.util.Slice;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static com.google.common.base.Preconditions.checkArgument;
@@ -67,7 +68,7 @@ public class Compaction implements AutoCloseable
         this.level = level;
         this.levelInputs = levelInputs;
         this.levelUpInputs = levelUpInputs;
-        this.grandparents = List.copyOf(requireNonNull(grandparents, "grandparents is null"));
+        this.grandparents = new ArrayList<FileMetaData>(requireNonNull(grandparents, "grandparents is null"));
         this.maxOutputFileSize = maxOutputFileSize;
         this.inputs = new List[] {levelInputs, levelUpInputs};
         inputVersion.retain();

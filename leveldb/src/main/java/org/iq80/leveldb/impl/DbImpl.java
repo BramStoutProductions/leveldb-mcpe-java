@@ -219,72 +219,79 @@ public class DbImpl
             // load  (and recover) current version
             boolean saveManifest = versions.recover();
 
-            // Recover from all newer log files than the ones named in the
-            // descriptor (new log files may have been added by the previous
-            // incarnation without registering them in the descriptor).
-            //
-            // Note that PrevLogNumber() is no longer used, but we pay
-            // attention to it in case we are recovering a database
-            // produced by an older version of leveldb.
-            long minLogNumber = versions.getLogNumber();
-            long previousLogNumber = versions.getPrevLogNumber();
-            final Set<Long> expected = versions.getLiveFiles().stream().map(FileMetaData::getNumber).collect(Collectors.toSet());
-            List<File> filenames = databaseDir.listFiles();
+            if (!options.readOnly()) {
+                // Recover from all newer log files than the ones named in the
+                // descriptor (new log files may have been added by the previous
+                // incarnation without registering them in the descriptor).
+                //
+                // Note that PrevLogNumber() is no longer used, but we pay
+                // attention to it in case we are recovering a database
+                // produced by an older version of leveldb.
+                long minLogNumber = versions.getLogNumber();
+                long previousLogNumber = versions.getPrevLogNumber();
+                final Set<Long> expected = versions.getLiveFiles().stream().map(FileMetaData::getNumber).collect(Collectors.toSet());
+                List<File> filenames = databaseDir.listFiles();
 
-            List<Long> logs = new ArrayList<>();
-            for (File filename : filenames) {
-                FileInfo fileInfo = Filename.parseFileName(filename);
-                if (fileInfo != null) {
-                    expected.remove(fileInfo.getFileNumber());
-                    if (fileInfo.getFileType() == FileType.LOG &&
-                            ((fileInfo.getFileNumber() >= minLogNumber) || (fileInfo.getFileNumber() == previousLogNumber))) {
-                        logs.add(fileInfo.getFileNumber());
+                List<Long> logs = new ArrayList<>();
+                for (File filename : filenames) {
+                    FileInfo fileInfo = Filename.parseFileName(filename);
+                    if (fileInfo != null) {
+                        expected.remove(fileInfo.getFileNumber());
+                        if (fileInfo.getFileType() == FileType.LOG &&
+                                ((fileInfo.getFileNumber() >= minLogNumber) || (fileInfo.getFileNumber() == previousLogNumber))) {
+                            logs.add(fileInfo.getFileNumber());
+                        }
                     }
                 }
+
+                checkArgument(expected.isEmpty(), "%s missing files", expected.size());
+
+                // Recover in the order in which the logs were generated
+                VersionEdit edit = new VersionEdit();
+                Collections.sort(logs);
+                for (Iterator<Long> iterator = logs.iterator(); iterator.hasNext(); ) {
+                    Long fileNumber = iterator.next();
+                    RecoverResult result = recoverLogFile(fileNumber, !iterator.hasNext(), edit);
+                    saveManifest |= result.saveManifest;
+
+                    // The previous incarnation may not have written any MANIFEST
+                    // records after allocating this log number.  So we manually
+                    // update the file number allocation counter in VersionSet.
+                    this.versions.markFileNumberUsed(fileNumber);
+
+                    if (versions.getLastSequence() < result.maxSequence) {
+                        versions.setLastSequence(result.maxSequence);
+                    }
+                }
+                //</editor-fold>
+
+                // open transaction log
+                if (memTable == null) {
+                    long logFileNumber = versions.getNextFileNumber();
+                    this.log = Logs.createLogWriter(databaseDir.child(Filename.logFileName(logFileNumber)), logFileNumber, env);
+                    c.register(log);
+                    edit.setLogNumber(log.getFileNumber());
+                    memTable = new MemTable(internalKeyComparator);
+                }
+
+                if (saveManifest) {
+                    edit.setPreviousLogNumber(0);
+                    edit.setLogNumber(log.getFileNumber());
+                    // apply recovered edits
+                    versions.logAndApply(edit, mutex);
+                }
+
+                // cleanup unused files
+                deleteObsoleteFiles();
+
+                // schedule compactions
+                maybeScheduleCompaction();
             }
-
-            checkArgument(expected.isEmpty(), "%s missing files", expected.size());
-
-            // Recover in the order in which the logs were generated
-            VersionEdit edit = new VersionEdit();
-            Collections.sort(logs);
-            for (Iterator<Long> iterator = logs.iterator(); iterator.hasNext(); ) {
-                Long fileNumber = iterator.next();
-                RecoverResult result = recoverLogFile(fileNumber, !iterator.hasNext(), edit);
-                saveManifest |= result.saveManifest;
-
-                // The previous incarnation may not have written any MANIFEST
-                // records after allocating this log number.  So we manually
-                // update the file number allocation counter in VersionSet.
-                this.versions.markFileNumberUsed(fileNumber);
-
-                if (versions.getLastSequence() < result.maxSequence) {
-                    versions.setLastSequence(result.maxSequence);
+            else {
+                if (memTable == null) {
+                    memTable = new MemTable(internalKeyComparator);
                 }
             }
-            //</editor-fold>
-
-            // open transaction log
-            if (memTable == null) {
-                long logFileNumber = versions.getNextFileNumber();
-                this.log = Logs.createLogWriter(databaseDir.child(Filename.logFileName(logFileNumber)), logFileNumber, env);
-                c.register(log);
-                edit.setLogNumber(log.getFileNumber());
-                memTable = new MemTable(internalKeyComparator);
-            }
-
-            if (saveManifest) {
-                edit.setPreviousLogNumber(0);
-                edit.setLogNumber(log.getFileNumber());
-                // apply recovered edits
-                versions.logAndApply(edit, mutex);
-            }
-
-            // cleanup unused files
-            deleteObsoleteFiles();
-
-            // schedule compactions
-            maybeScheduleCompaction();
             success = true;
         }
         catch (Throwable e) {
@@ -384,7 +391,9 @@ public class DbImpl
         catch (IOException ignored) {
         }
         try {
-            log.close();
+            if (log != null) {
+               log.close();
+            }
         }
         catch (IOException ignored) {
         }
@@ -456,6 +465,7 @@ public class DbImpl
     private void deleteObsoleteFiles()
     {
         checkState(mutex.isHeldByCurrentThread());
+        checkState(!options.readOnly());
         if (backgroundException != null) {
             return;
         }
@@ -523,6 +533,7 @@ public class DbImpl
     private void maybeScheduleCompaction()
     {
         checkState(mutex.isHeldByCurrentThread());
+        checkState(!options.readOnly());
 
         if (backgroundCompaction != null) {
             // Already scheduled
@@ -588,6 +599,7 @@ public class DbImpl
             throws IOException
     {
         checkState(mutex.isHeldByCurrentThread());
+        checkState(!options.readOnly());
 
         if (immutableMemTable != null) {
             compactMemTable();
@@ -679,6 +691,7 @@ public class DbImpl
     private void cleanupCompaction(CompactionState compactionState) throws IOException
     {
         checkState(mutex.isHeldByCurrentThread());
+        checkState(!options.readOnly());
 
         if (compactionState.builder != null) {
             compactionState.builder.abandon();
@@ -763,7 +776,7 @@ public class DbImpl
                 }
 
                 // flush mem table if necessary
-                if (mem.approximateMemoryUsage() > options.writeBufferSize()) {
+                if (mem.approximateMemoryUsage() > options.writeBufferSize() && !options.readOnly()) {
                     compactions++;
                     saveManifest = true;
                     writeLevel0Table(mem, edit, null);
@@ -772,7 +785,7 @@ public class DbImpl
             }
 
             // See if we should keep reusing the last log file.
-            if (options.reuseLogs() && lastLog && compactions == 0) {
+            if (options.reuseLogs() && lastLog && compactions == 0 && !options.readOnly()) {
                 Preconditions.checkState(this.log == null);
                 Preconditions.checkState(this.memTable == null);
                 long originalSize = file.length();
@@ -790,7 +803,7 @@ public class DbImpl
             }
 
             // flush mem table
-            if (mem != null && !mem.isEmpty()) {
+            if (mem != null && !mem.isEmpty() && !options.readOnly()) {
                 saveManifest = true;
                 writeLevel0Table(mem, edit, null);
             }
@@ -841,7 +854,7 @@ public class DbImpl
             }
             finally {
                 mutex.lock();
-                if (readStats != null && current.updateStats(readStats)) {
+                if (readStats != null && current.updateStats(readStats) && !this.options.readOnly()) {
                     maybeScheduleCompaction();
                 }
                 current.release();
@@ -864,6 +877,7 @@ public class DbImpl
     public void put(byte[] key, byte[] value)
             throws DBException
     {
+        checkState(!options.readOnly());
         put(key, value, new WriteOptions());
     }
 
@@ -871,6 +885,7 @@ public class DbImpl
     public Snapshot put(byte[] key, byte[] value, WriteOptions options)
             throws DBException
     {
+        checkState(!this.options.readOnly());
         try (WriteBatchImpl writeBatch = new WriteBatchImpl()) {
             return writeInternal(writeBatch.put(key, value), options);
         }
@@ -880,6 +895,7 @@ public class DbImpl
     public void delete(byte[] key)
             throws DBException
     {
+        checkState(!options.readOnly());
         delete(key, new WriteOptions());
     }
 
@@ -887,6 +903,7 @@ public class DbImpl
     public Snapshot delete(byte[] key, WriteOptions options)
             throws DBException
     {
+        checkState(!this.options.readOnly());
         try (WriteBatchImpl writeBatch = new WriteBatchImpl()) {
             return writeInternal(writeBatch.delete(key), options);
         }
@@ -896,6 +913,7 @@ public class DbImpl
     public void write(WriteBatch updates)
             throws DBException
     {
+        checkState(!options.readOnly());
         writeInternal((WriteBatchImpl) updates, new WriteOptions());
     }
 
@@ -903,12 +921,14 @@ public class DbImpl
     public Snapshot write(WriteBatch updates, WriteOptions options)
             throws DBException
     {
+        checkState(!this.options.readOnly());
         return writeInternal((WriteBatchImpl) updates, options);
     }
 
     public Snapshot writeInternal(WriteBatchImpl myBatch, WriteOptions options)
             throws DBException
     {
+        checkState(!this.options.readOnly());
         checkBackgroundException();
         final WriteBatchInternal w = new WriteBatchInternal(myBatch, options.sync(), mutex.newCondition());
         mutex.lock();
@@ -963,6 +983,7 @@ public class DbImpl
 
     private void multipleWriteGroup(WriteBatchImpl myBatch, WriteOptions options, ValueHolder<WriteBatchInternal> lastWriter)
     {
+        checkState(!this.options.readOnly());
         long sequenceEnd;
         WriteBatchImpl updates = null;
         // May temporarily unlock and wait.
@@ -1018,6 +1039,7 @@ public class DbImpl
      */
     private WriteBatchImpl buildBatchGroup(ValueHolder<WriteBatchInternal> lastWriter)
     {
+        checkState(!this.options.readOnly());
         checkArgument(!writers.isEmpty(), "A least one writer is required");
         final WriteBatchInternal first = writers.peekFirst();
         WriteBatchImpl result = first.batch;
@@ -1133,6 +1155,7 @@ public class DbImpl
      */
     void recordReadSample(InternalKey key)
     {
+        checkState(!options.readOnly());
         mutex.lock();
         try {
             if (versions.getCurrent().recordReadSample(key)) {
@@ -1172,6 +1195,7 @@ public class DbImpl
     private void makeRoomForWrite(boolean force)
     {
         checkState(mutex.isHeldByCurrentThread());
+        checkState(!options.readOnly());
         checkState(!writers.isEmpty());
 
         boolean allowDelay = !force;
@@ -1253,6 +1277,7 @@ public class DbImpl
             throws IOException
     {
         checkState(mutex.isHeldByCurrentThread());
+        checkState(!options.readOnly());
         checkState(immutableMemTable != null);
 
         try {
@@ -1285,6 +1310,7 @@ public class DbImpl
     {
         final long startMicros = env.nowMicros();
         checkState(mutex.isHeldByCurrentThread());
+        checkState(!options.readOnly());
 
         // skip empty mem table
         if (mem.isEmpty()) {
@@ -1327,6 +1353,7 @@ public class DbImpl
     private FileMetaData buildTable(MemTable data, long fileNumber)
             throws IOException
     {
+        checkState(!options.readOnly());
         File file = databaseDir.child(Filename.tableFileName(fileNumber));
         try {
             InternalKey smallest = null;
@@ -1381,6 +1408,7 @@ public class DbImpl
                 compactionState.compaction.getLevel() + 1);
 
         checkState(mutex.isHeldByCurrentThread());
+        checkState(!options.readOnly());
         checkArgument(versions.numberOfBytesInLevel(compactionState.getCompaction().getLevel()) > 0);
         checkArgument(compactionState.builder == null);
         checkArgument(compactionState.outfile == null);
@@ -1526,6 +1554,7 @@ public class DbImpl
         requireNonNull(compactionState, "compactionState is null");
         checkArgument(compactionState.outfile != null);
         checkArgument(compactionState.builder != null);
+        checkState(!options.readOnly());
 
         long outputNumber = compactionState.currentFileNumber;
         checkArgument(outputNumber != 0);
@@ -1568,6 +1597,7 @@ public class DbImpl
             throws IOException
     {
         checkState(mutex.isHeldByCurrentThread());
+        checkState(!options.readOnly());
         options.logger().log("Compacted %s@%s + %s@%s files => %s bytes",
                 compact.compaction.input(0).size(),
                 compact.compaction.getLevel(),
@@ -1832,6 +1862,7 @@ public class DbImpl
     public void compactRange(byte[] begin, byte[] end)
             throws DBException
     {
+        checkState(!options.readOnly());
         final Slice smallestUserKey = begin == null ? null : new Slice(begin, 0, begin.length);
         final Slice largestUserKey = end == null ? null : new Slice(end, 0, end.length);
         int maxLevelWithFiles = 1;

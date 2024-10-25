@@ -105,7 +105,7 @@ public class VersionEdit
 
     public Map<Integer, InternalKey> getCompactPointers()
     {
-        return Map.copyOf(compactPointers);
+        return new TreeMap<Integer, InternalKey>(compactPointers);
     }
 
     public void setCompactPointer(int level, InternalKey key)

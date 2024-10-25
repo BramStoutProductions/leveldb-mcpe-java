@@ -42,9 +42,22 @@ public final class ZLib
         Inflater inflater = (raw ? INFLATER_RAW : INFLATER).get();
         try {
             ByteBuffer buffer = ByteBuffer.allocate(1024);
-            inflater.setInput(compressed);
+            byte[] compressedArray = null;
+            int compressedArrayOffset = 0;
+            int compressedArraySize = compressed.limit() - compressed.position();
+            if (compressed.hasArray() && !compressed.isReadOnly()) {
+                compressedArray = compressed.array();
+                compressedArrayOffset = compressed.arrayOffset() + compressed.position();
+            }
+            else {
+                compressedArray = new byte[compressedArraySize];
+                compressed.get(compressedArray);
+            }
+            inflater.setInput(compressedArray, compressedArrayOffset, compressedArraySize);
             while (!inflater.finished()) {
-                if (inflater.inflate(buffer) == 0) {
+                int bytesInflated = inflater.inflate(buffer.array(), buffer.position(), buffer.limit() - buffer.position());
+                buffer.position(buffer.position() + bytesInflated);
+                if (bytesInflated == 0) {
                     // Grow buffer
                     ByteBuffer newBuffer = ByteBuffer.allocate(buffer.capacity() + 1024);
                     int position = buffer.position();

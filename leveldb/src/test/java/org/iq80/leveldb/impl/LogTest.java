@@ -30,6 +30,7 @@ import org.testng.annotations.Test;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.List;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
@@ -113,7 +114,7 @@ public class LogTest
     public void testReadWithoutProperClose()
             throws Exception
     {
-        testLog(List.of(toSlice("something"), toSlice("something else")), false);
+        testLog(Arrays.asList(toSlice("something"), toSlice("something else")), false);
     }
 
     private void testLog(Slice... entries)

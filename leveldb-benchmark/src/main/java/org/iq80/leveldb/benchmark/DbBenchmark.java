@@ -846,7 +846,7 @@ public class DbBenchmark
         //      compact     -- Compact the entire DB
         //      stats       -- Print DB stats
         //      heapprofile -- Dump a heap profile (if supported by this port)
-        benchmarks(List.of(
+        benchmarks(Arrays.asList(
                 "fillseq",
                 "fillsync",
                 "fillrandom",

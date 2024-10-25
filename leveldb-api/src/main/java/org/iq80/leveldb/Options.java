@@ -22,6 +22,7 @@ package org.iq80.leveldb;
  */
 public class Options
 {
+    private boolean readOnly = false;
     private boolean createIfMissing = true;
     private boolean errorIfExists;
     private int writeBufferSize = 4 << 20;
@@ -46,6 +47,7 @@ public class Options
     {
         checkArgNotNull(options, "Options can't be null");
         final Options options1 = new Options();
+        options1.readOnly = options.readOnly;
         options1.createIfMissing = options.createIfMissing;
         options1.errorIfExists = options.errorIfExists;
         options1.writeBufferSize = options.writeBufferSize;
@@ -76,6 +78,17 @@ public class Options
         if (value == null) {
             throw new IllegalArgumentException("The " + name + " argument cannot be null");
         }
+    }
+
+    public boolean readOnly()
+    {
+        return readOnly;
+    }
+
+    public Options readOnly(boolean readOnly)
+    {
+        this.readOnly = readOnly;
+        return this;
     }
 
     /**

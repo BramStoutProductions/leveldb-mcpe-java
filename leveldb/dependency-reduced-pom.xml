@@ -85,8 +85,8 @@
       <plugin>
         <artifactId>maven-compiler-plugin</artifactId>
         <configuration>
-          <source>11</source>
-          <target>11</target>
+          <source>8</source>
+          <target>8</target>
         </configuration>
       </plugin>
     </plugins>
@@ -141,8 +141,8 @@
   </dependencies>
   <properties>
     <air.test.jvmsize>2048m</air.test.jvmsize>
-    <shadeBase>org.iq80.leveldb.shaded</shadeBase>
     <air.main.basedir>${project.parent.basedir}</air.main.basedir>
+    <shadeBase>org.iq80.leveldb.shaded</shadeBase>
     <air.test.thread-count>1</air.test.thread-count>
   </properties>
 </project>

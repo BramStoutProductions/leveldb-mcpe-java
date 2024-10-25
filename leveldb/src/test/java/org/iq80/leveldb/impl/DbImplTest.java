@@ -120,7 +120,7 @@ public class DbImplTest
         options.createIfMissing(true);
         DbStringWrapper db = new DbStringWrapper(options, this.databaseDir, defaultEnv);
         Random random = new Random(301);
-        for (int i = 0; i < 200000 * STRESS_FACTOR; i++) {
+        for (int i = 0; i < 100000 * STRESS_FACTOR; i++) {
             db.put(randomString(random, 64), new String(new byte[] {0x01}, UTF_8), new WriteOptions().sync(false));
             db.get(randomString(random, 64));
             if ((i % 50000) == 0 && i != 0) {

@@ -71,6 +71,7 @@ public class TableBuilder
     private Slice compressedOutput;
 
     private long position;
+    private boolean readOnly;
 
     public TableBuilder(Options options, WritableFile file, UserComparator userComparator)
     {
@@ -83,6 +84,7 @@ public class TableBuilder
         blockRestartInterval = options.blockRestartInterval();
         blockSize = options.blockSize();
         compressionType = options.compressionType();
+        readOnly = options.readOnly();
 
         dataBlockBuilder = new BlockBuilder((int) Math.min(blockSize * 1.1, options.maxFileSize()), blockRestartInterval, userComparator);
 
@@ -125,6 +127,7 @@ public class TableBuilder
         requireNonNull(value, "value is null");
 
         checkState(!closed, "table is finished");
+        checkState(!readOnly, "table is read only");
 
         if (entryCount > 0) {
             assert (userComparator.compare(key, lastKey) > 0) : "key must be greater than last key";
@@ -159,6 +162,7 @@ public class TableBuilder
             throws IOException
     {
         checkState(!closed, "table is finished");
+        checkState(!readOnly, "table is read only");
         if (dataBlockBuilder.isEmpty()) {
             return;
         }
@@ -266,6 +270,10 @@ public class TableBuilder
             throws IOException
     {
         checkState(!closed, "table is finished");
+        if (readOnly) {
+            closed = true;
+            return;
+        }
 
         // flush current data block
         flush();
