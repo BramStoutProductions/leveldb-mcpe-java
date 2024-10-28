@@ -2000,6 +2000,9 @@ public class DbImpl
         @Override
         public void record(InternalKey internalKey, int bytes)
         {
+            if (DbImpl.this.options.readOnly()) {
+                return;
+            }
             bytesReadUntilSampling -= bytes;
             while (bytesReadUntilSampling < 0) {
                 bytesReadUntilSampling += getRandomCompactionPeriod(r);
