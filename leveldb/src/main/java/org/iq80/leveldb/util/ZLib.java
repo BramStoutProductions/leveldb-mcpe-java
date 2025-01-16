@@ -41,7 +41,6 @@ public final class ZLib
     {
         Inflater inflater = (raw ? INFLATER_RAW : INFLATER).get();
         try {
-            ByteBuffer buffer = ByteBuffer.allocate(1024);
             byte[] compressedArray = null;
             int compressedArrayOffset = 0;
             int compressedArraySize = compressed.limit() - compressed.position();
@@ -53,13 +52,15 @@ public final class ZLib
                 compressedArray = new byte[compressedArraySize];
                 compressed.get(compressedArray);
             }
+            // Guess the uncompressed size. Assuming a compression ratio of 66%
+            ByteBuffer buffer = ByteBuffer.allocate((compressedArraySize * 3) / 2);
             inflater.setInput(compressedArray, compressedArrayOffset, compressedArraySize);
             while (!inflater.finished()) {
                 int bytesInflated = inflater.inflate(buffer.array(), buffer.position(), buffer.limit() - buffer.position());
                 buffer.position(buffer.position() + bytesInflated);
                 if (bytesInflated == 0) {
                     // Grow buffer
-                    ByteBuffer newBuffer = ByteBuffer.allocate(buffer.capacity() + 1024);
+                    ByteBuffer newBuffer = ByteBuffer.allocate(buffer.capacity() + Math.max(compressedArraySize / 4, 1024));
                     int position = buffer.position();
 
                     // Reset reader index
